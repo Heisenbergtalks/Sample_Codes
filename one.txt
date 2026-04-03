@@ -1,136 +1,137 @@
 import pandas as pd
 import numpy as np
+from xgboost import XGBClassifier
+from sklearn.metrics import (classification_report, 
+                             confusion_matrix,
+                             roc_auc_score)
+import matplotlib.pyplot as plt
 
 # ── Load data ────────────────────────────────────────────────────────────
-df = pd.read_csv("ghcnd_mco_1984_2024.csv")
+df = pd.read_csv("master_feature_table_1984_2025.csv")
 
-# ── Parse date ───────────────────────────────────────────────────────────
-df["DATE"] = pd.to_datetime(df["DATE"])
-df["year"] = df["DATE"].dt.year
-df["month"] = df["DATE"].dt.month
+# ── Define features ───────────────────────────────────────────────────────
+drop_cols = [
+    "year",
+    "hit",
+    "n_storms_within_150mi",
+    "closest_storm",
+    "closest_dist_mi",
+    "enso_phase",        # categorical — enso_aso covers this
+]
 
-# ── Unit conversions ─────────────────────────────────────────────────────
-# PRCP: inches to mm
-df["PRCP_mm"] = df["PRCP"] * 25.4
+feature_cols = [c for c in df.columns if c not in drop_cols]
+print(f"Features used: {len(feature_cols)}")
+print(feature_cols)
 
-# Temperature: Fahrenheit to Celsius
-df["TMAX_C"] = (df["TMAX"] - 32) * 5/9
-df["TMIN_C"] = (df["TMIN"] - 32) * 5/9
-df["TAVG_C"] = (df["TAVG"] - 32) * 5/9
+X = df[feature_cols]
+y = df["hit"]
 
-# Wind: mph to m/s
-df["AWND_ms"] = df["AWND"] * 0.44704
-df["WSF2_ms"] = df["WSF2"] * 0.44704
-df["WSF5_ms"] = df["WSF5"] * 0.44704
+# ── Train / validation split ──────────────────────────────────────────────
+# MUST be time based — no random splits
+train = df[df["year"] <= 2015]
+valid = df[df["year"] >  2015]
 
-# ── Filter to hurricane season June-November ──────────────────────────────
-season = df[df["month"].between(6, 11)].copy()
+X_train = train[feature_cols]
+y_train = train["hit"]
+X_valid = valid[feature_cols]
+y_valid = valid["hit"]
 
-# ── Baseline period 1984-2010 for anomalies ───────────────────────────────
-baseline = season[season["year"].between(1984, 2010)]
+print(f"\nTrain: {len(train)} years (1984-2015)")
+print(f"Valid: {len(valid)} years (2016-2025)")
+print(f"Train hits: {y_train.sum()} / {len(y_train)}")
+print(f"Valid hits: {y_valid.sum()} / {len(y_valid)}")
 
-baseline_prcp = baseline.groupby("year")["PRCP_mm"].sum().mean()
-baseline_tmax = baseline.groupby("year")["TMAX_C"].mean().mean()
-baseline_awnd = baseline.groupby("year")["AWND_ms"].mean().mean()
+# ── Class imbalance weight ────────────────────────────────────────────────
+n_neg = (y_train == 0).sum()
+n_pos = (y_train == 1).sum()
+scale = n_neg / n_pos
+print(f"\nClass weight (scale_pos_weight): {scale:.2f}")
 
-print(f"Baseline precip (Jun-Nov): {baseline_prcp:.1f} mm")
-print(f"Baseline TMAX  (Jun-Nov): {baseline_tmax:.2f} C")
-print(f"Baseline AWND  (Jun-Nov): {baseline_awnd:.2f} m/s")
+# ── Train XGBoost ─────────────────────────────────────────────────────────
+model = XGBClassifier(
+    n_estimators      = 100,
+    max_depth         = 3,       # shallow — prevents overfit on small data
+    learning_rate     = 0.05,    # slow learning
+    scale_pos_weight  = scale,   # handle class imbalance
+    subsample         = 0.8,     # row sampling
+    colsample_bytree  = 0.8,     # feature sampling
+    random_state      = 42,
+    eval_metric       = "logloss",
+    verbosity         = 0,
+)
 
-# ── Rolling window functions ──────────────────────────────────────────────
-def max_rolling_precip(group, window):
-    return group["PRCP_mm"].rolling(window, min_periods=window).sum().max()
+model.fit(
+    X_train, y_train,
+    eval_set=[(X_valid, y_valid)],
+    verbose=False,
+)
 
-# ── Build annual features ─────────────────────────────────────────────────
-rows = []
+# ── Predictions ───────────────────────────────────────────────────────────
+train_probs = model.predict_proba(X_train)[:, 1]
+valid_probs = model.predict_proba(X_valid)[:, 1]
+valid_preds = (valid_probs >= 0.5).astype(int)
 
-for yr in range(1984, 2025):
-    yr_season = season[season["year"] == yr]
-    
-    if len(yr_season) < 100:
-        print(f"WARNING: {yr} has only {len(yr_season)} days — check data")
-        continue
+# ── Validation results ────────────────────────────────────────────────────
+print("\n" + "="*50)
+print("VALIDATION RESULTS (2016-2025)")
+print("="*50)
 
-    # PRECIPITATION FEATURES
-    total_prcp          = yr_season["PRCP_mm"].sum()
-    max_1day_prcp       = yr_season["PRCP_mm"].max()
-    max_7day_prcp       = yr_season["PRCP_mm"].rolling(7,  min_periods=7).sum().max()
-    max_14day_prcp      = yr_season["PRCP_mm"].rolling(14, min_periods=14).sum().max()
-    count_days_25mm     = (yr_season["PRCP_mm"] > 25.4).sum()   # >1 inch
-    count_days_50mm     = (yr_season["PRCP_mm"] > 50.8).sum()   # >2 inches
-    count_days_75mm     = (yr_season["PRCP_mm"] > 76.2).sum()   # >3 inches
-    prcp_anomaly        = total_prcp - baseline_prcp
-    longest_dry         = (yr_season["PRCP_mm"] < 2.54
-                          ).astype(int).groupby(
-                          (yr_season["PRCP_mm"] >= 2.54)
-                          .astype(int).cumsum()).sum().max()
+print("\nYear by year:")
+for i, (yr, prob, actual) in enumerate(
+    zip(valid["year"], valid_probs, y_valid)):
+    flag = "✓" if (prob >= 0.5) == actual else "✗"
+    print(f"  {yr}: P(hit)={prob:.2f}  actual={actual}  {flag}")
 
-    # TEMPERATURE FEATURES
-    mean_tmax           = yr_season["TMAX_C"].mean()
-    tmax_anomaly        = mean_tmax - baseline_tmax
+print(f"\nROC-AUC score: {roc_auc_score(y_valid, valid_probs):.3f}")
+print(f"\nClassification report:")
+print(classification_report(y_valid, valid_preds,
+      target_names=["No hit","Hit"]))
 
-    # Aug-Oct specifically for peak season
-    aug_oct             = yr_season[yr_season["month"].between(8, 10)]
-    mean_tmax_aug_oct   = aug_oct["TMAX_C"].mean()
-    mean_tavg_aug_oct   = aug_oct["TAVG_C"].mean()
-    count_days_90f      = (yr_season["TMAX_C"] > 32.2).sum()  # 90F = 32.2C
-    count_days_95f      = (yr_season["TMAX_C"] > 35.0).sum()  # 95F = 35.0C
+print("\nConfusion matrix:")
+cm = confusion_matrix(y_valid, valid_preds)
+print(f"  True Quiet predicted Quiet:    {cm[0][0]}")
+print(f"  True Quiet predicted Hit:      {cm[0][1]}")
+print(f"  True Hit   predicted Quiet:    {cm[1][0]}")
+print(f"  True Hit   predicted Hit:      {cm[1][1]}")
 
-    # WIND FEATURES (AWND full period)
-    mean_awnd           = yr_season["AWND_ms"].mean()
-    max_awnd            = yr_season["AWND_ms"].max()
-    count_wind_5ms      = (yr_season["AWND_ms"] > 5.0).sum()
-    count_wind_7ms      = (yr_season["AWND_ms"] > 7.0).sum()
-    awnd_anomaly        = mean_awnd - baseline_awnd
+# ── Feature importance ────────────────────────────────────────────────────
+print("\n" + "="*50)
+print("FEATURE IMPORTANCE (top 10)")
+print("="*50)
 
-    # WSF features (1996 onwards — NaN before)
-    max_wsf2            = yr_season["WSF2_ms"].max()
-    max_wsf5            = yr_season["WSF5_ms"].max()
-    count_wsf2_10ms     = (yr_season["WSF2_ms"] > 10.0).sum()
+importance = pd.DataFrame({
+    "feature":    feature_cols,
+    "importance": model.feature_importances_,
+}).sort_values("importance", ascending=False)
 
-    # COMPOUND FEATURES
-    compound_days       = (
-        (yr_season["PRCP_mm"] > 25.4) &
-        (yr_season["AWND_ms"] > 5.0)
-    ).sum()
+print(importance.head(10).to_string(index=False))
 
-    rows.append({
-        "year":              yr,
-        # precip
-        "total_prcp_mm":     round(total_prcp, 1),
-        "max_1day_prcp_mm":  round(max_1day_prcp, 1),
-        "max_7day_prcp_mm":  round(max_7day_prcp, 1),
-        "max_14day_prcp_mm": round(max_14day_prcp, 1),
-        "count_days_25mm":   int(count_days_25mm),
-        "count_days_50mm":   int(count_days_50mm),
-        "count_days_75mm":   int(count_days_75mm),
-        "prcp_anomaly_mm":   round(prcp_anomaly, 1),
-        "longest_dry_spell": int(longest_dry),
-        # temperature
-        "mean_tmax_C":       round(mean_tmax, 2),
-        "tmax_anomaly_C":    round(tmax_anomaly, 2),
-        "mean_tmax_aug_oct": round(mean_tmax_aug_oct, 2),
-        "mean_tavg_aug_oct": round(mean_tavg_aug_oct, 2),
-        "count_days_90f":    int(count_days_90f),
-        "count_days_95f":    int(count_days_95f),
-        # wind
-        "mean_awnd_ms":      round(mean_awnd, 2),
-        "max_awnd_ms":       round(max_awnd, 2),
-        "count_wind_5ms":    int(count_wind_5ms),
-        "count_wind_7ms":    int(count_wind_7ms),
-        "awnd_anomaly_ms":   round(awnd_anomaly, 3),
-        "max_wsf2_ms":       round(max_wsf2, 2) if not pd.isna(max_wsf2) else None,
-        "max_wsf5_ms":       round(max_wsf5, 2) if not pd.isna(max_wsf5) else None,
-        "count_wsf2_10ms":   int(count_wsf2_10ms) if not pd.isna(count_wsf2_10ms) else None,
-        # compound
-        "compound_days":     int(compound_days),
-    })
+# ── Full probability output 1984-2025 ────────────────────────────────────
+all_probs = model.predict_proba(X)[:, 1]
+results = pd.DataFrame({
+    "year":        df["year"].values,
+    "hit_actual":  y.values,
+    "p_hit":       all_probs.round(3),
+    "predicted":   (all_probs >= 0.5).astype(int),
+    "correct":     ((all_probs >= 0.5).astype(int) == y.values).astype(int),
+    "split":       ["train" if yr <= 2015 else "valid"
+                    for yr in df["year"].values],
+})
 
-# ── Save ──────────────────────────────────────────────────────────────────
-out = pd.DataFrame(rows)
-out.to_csv("ghcnd_features_annual_1984_2024.csv", index=False)
+results.to_csv("xgboost_annual_probabilities.csv", index=False)
+print(f"\nSaved: xgboost_annual_probabilities.csv")
 
-print(f"\nDone. {len(out)} years processed.")
-print(f"Features: {len(out.columns)-1}")
-print("\nSample (first 3 rows):")
-print(out.head(3).to_string())
+# ── Save model ────────────────────────────────────────────────────────────
+model.save_model("xgboost_hurricane_model.json")
+print("Saved: xgboost_hurricane_model.json")
+
+# ── Plot feature importance ───────────────────────────────────────────────
+top10 = importance.head(10)
+plt.figure(figsize=(8,5))
+plt.barh(top10["feature"][::-1], 
+         top10["importance"][::-1])
+plt.xlabel("Importance")
+plt.title("XGBoost Feature Importance — Top 10")
+plt.tight_layout()
+plt.savefig("feature_importance.png", dpi=150)
+print("Saved: feature_importance.png")
