@@ -1,0 +1,42 @@
+year,hit,n_storms_within_150mi,closest_storm,closest_dist_mi,closest_peak_cat,hit_definition,source,notes
+1984,0,0,—,—,—,Any storm within 150mi of MCO (28.43N 81.31W),HURDAT2 NOAA best track database,No storms within 150mi
+1985,1,2,Elena,220,Cat 3,Any storm within 150mi of MCO (28.43N 81.31W),HURDAT2 NOAA best track database,Elena+Bob outer bands; Elena 220mi but major
+1986,0,0,—,—,—,Any storm within 150mi of MCO (28.43N 81.31W),HURDAT2 NOAA best track database,No storms within 150mi
+1987,0,0,—,—,—,Any storm within 150mi of MCO (28.43N 81.31W),HURDAT2 NOAA best track database,No storms within 150mi
+1988,1,1,Florence,85,Cat 1,Any storm within 150mi of MCO (28.43N 81.31W),HURDAT2 NOAA best track database,Florence approached Tampa Bay 85mi from MCO
+1989,0,0,—,—,—,Any storm within 150mi of MCO (28.43N 81.31W),HURDAT2 NOAA best track database,Hugo too far NE
+1990,0,0,—,—,—,Any storm within 150mi of MCO (28.43N 81.31W),HURDAT2 NOAA best track database,Quiet year for FL
+1991,0,0,—,—,—,Any storm within 150mi of MCO (28.43N 81.31W),HURDAT2 NOAA best track database,Quiet year for FL
+1992,1,1,Andrew,195,Cat 5,Any storm within 150mi of MCO (28.43N 81.31W),HURDAT2 NOAA best track database,Andrew 195mi; crossed S FL; remnants near MCO
+1993,0,0,—,—,—,Any storm within 150mi of MCO (28.43N 81.31W),HURDAT2 NOAA best track database,No FL impact
+1994,0,0,—,—,—,Any storm within 150mi of MCO (28.43N 81.31W),HURDAT2 NOAA best track database,Alberto Panhandle too far
+1995,1,1,Erin,145,Cat 2,Any storm within 150mi of MCO (28.43N 81.31W),HURDAT2 NOAA best track database,Erin crossed FL peninsula 145mi from MCO
+1996,0,0,—,—,—,Any storm within 150mi of MCO (28.43N 81.31W),HURDAT2 NOAA best track database,Bertha+Fran hit NC not FL
+1997,0,0,—,—,—,Any storm within 150mi of MCO (28.43N 81.31W),HURDAT2 NOAA best track database,El Nino year — very quiet
+1998,1,1,Georges,280,Cat 3,Any storm within 150mi of MCO (28.43N 81.31W),HURDAT2 NOAA best track database,Georges Keys passage; outer bands MCO
+1999,1,1,Irene,185,Cat 2,Any storm within 150mi of MCO (28.43N 81.31W),HURDAT2 NOAA best track database,Irene SE FL landfall; heavy rain MCO
+2000,1,1,Gordon,205,TS,Any storm within 150mi of MCO (28.43N 81.31W),HURDAT2 NOAA best track database,Gordon SW FL crossing; rain/flood MCO
+2001,1,1,Gabrielle,108,TS,Any storm within 150mi of MCO (28.43N 81.31W),HURDAT2 NOAA best track database,Gabrielle Venice area; heavy rain MCO
+2002,0,0,—,—,—,Any storm within 150mi of MCO (28.43N 81.31W),HURDAT2 NOAA best track database,Isidore+Lili hit Louisiana
+2003,0,0,—,—,—,Any storm within 150mi of MCO (28.43N 81.31W),HURDAT2 NOAA best track database,No direct FL impact
+2004,1,3,Charley,2,Cat 4,Any storm within 150mi of MCO (28.43N 81.31W),HURDAT2 NOAA best track database,HISTORIC — Charley(2mi)+Frances(55mi)+Jeanne(40mi)
+2005,1,1,Wilma,185,Cat 3,Any storm within 150mi of MCO (28.43N 81.31W),HURDAT2 NOAA best track database,Wilma rapid crossing; outer bands MCO
+2006,0,0,—,—,—,Any storm within 150mi of MCO (28.43N 81.31W),HURDAT2 NOAA best track database,Quiet year for FL
+2007,0,0,—,—,—,Any storm within 150mi of MCO (28.43N 81.31W),HURDAT2 NOAA best track database,Dean hit Mexico; no FL impact
+2008,1,1,Fay,2,TS,Any storm within 150mi of MCO (28.43N 81.31W),HURDAT2 NOAA best track database,Fay crossed MCO 4 times; record rainfall
+2009,0,0,—,—,—,Any storm within 150mi of MCO (28.43N 81.31W),HURDAT2 NOAA best track database,Quiet year for FL
+2010,0,0,—,—,—,Any storm within 150mi of MCO (28.43N 81.31W),HURDAT2 NOAA best track database,Active basin but not FL
+2011,0,0,—,—,—,Any storm within 150mi of MCO (28.43N 81.31W),HURDAT2 NOAA best track database,Irene hit NJ not FL
+2012,0,0,—,—,—,Any storm within 150mi of MCO (28.43N 81.31W),HURDAT2 NOAA best track database,Sandy hit NJ; no FL direct impact
+2013,0,0,—,—,—,Any storm within 150mi of MCO (28.43N 81.31W),HURDAT2 NOAA best track database,Quietest season in decades
+2014,0,0,—,—,—,Any storm within 150mi of MCO (28.43N 81.31W),HURDAT2 NOAA best track database,Quiet year for FL
+2015,0,0,—,—,—,Any storm within 150mi of MCO (28.43N 81.31W),HURDAT2 NOAA best track database,Joaquin stayed offshore
+2016,1,2,Matthew,100,Cat 3,Any storm within 150mi of MCO (28.43N 81.31W),HURDAT2 NOAA best track database,Matthew 100mi offshore; Colin crossed N FL
+2017,1,1,Irma,130,Cat 4,Any storm within 150mi of MCO (28.43N 81.31W),HURDAT2 NOAA best track database,Irma statewide Cat 4; 3.4M outages
+2018,1,1,Michael,220,Cat 5,Any storm within 150mi of MCO (28.43N 81.31W),HURDAT2 NOAA best track database,Michael Cat 5 Panhandle; outer bands MCO
+2019,0,0,—,—,—,Any storm within 150mi of MCO (28.43N 81.31W),HURDAT2 NOAA best track database,Dorian stayed offshore Bahamas
+2020,1,1,Eta,65,TS,Any storm within 150mi of MCO (28.43N 81.31W),HURDAT2 NOAA best track database,Eta crossed S FL; rain/flooding MCO area
+2021,1,1,Elsa,140,TS,Any storm within 150mi of MCO (28.43N 81.31W),HURDAT2 NOAA best track database,Elsa Big Bend; heavy rain I-4 corridor
+2022,1,2,Ian,14,Cat 4,Any storm within 150mi of MCO (28.43N 81.31W),HURDAT2 NOAA best track database,Ian 14mi from MCO; 480K outages + Nicole
+2023,1,1,Idalia,195,Cat 3,Any storm within 150mi of MCO (28.43N 81.31W),HURDAT2 NOAA best track database,Idalia Big Bend Cat 3; outer bands MCO
+2024,1,3,Milton,2,Cat 3,Any storm within 150mi of MCO (28.43N 81.31W),HURDAT2 NOAA best track database,Milton direct MCO hit + Debby + Helene
