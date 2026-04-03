@@ -1,1 +1,136 @@
-fsdsdada
+import pandas as pd
+import numpy as np
+
+# ── Load data ────────────────────────────────────────────────────────────
+df = pd.read_csv("ghcnd_mco_1984_2024.csv")
+
+# ── Parse date ───────────────────────────────────────────────────────────
+df["DATE"] = pd.to_datetime(df["DATE"])
+df["year"] = df["DATE"].dt.year
+df["month"] = df["DATE"].dt.month
+
+# ── Unit conversions ─────────────────────────────────────────────────────
+# PRCP: inches to mm
+df["PRCP_mm"] = df["PRCP"] * 25.4
+
+# Temperature: Fahrenheit to Celsius
+df["TMAX_C"] = (df["TMAX"] - 32) * 5/9
+df["TMIN_C"] = (df["TMIN"] - 32) * 5/9
+df["TAVG_C"] = (df["TAVG"] - 32) * 5/9
+
+# Wind: mph to m/s
+df["AWND_ms"] = df["AWND"] * 0.44704
+df["WSF2_ms"] = df["WSF2"] * 0.44704
+df["WSF5_ms"] = df["WSF5"] * 0.44704
+
+# ── Filter to hurricane season June-November ──────────────────────────────
+season = df[df["month"].between(6, 11)].copy()
+
+# ── Baseline period 1984-2010 for anomalies ───────────────────────────────
+baseline = season[season["year"].between(1984, 2010)]
+
+baseline_prcp = baseline.groupby("year")["PRCP_mm"].sum().mean()
+baseline_tmax = baseline.groupby("year")["TMAX_C"].mean().mean()
+baseline_awnd = baseline.groupby("year")["AWND_ms"].mean().mean()
+
+print(f"Baseline precip (Jun-Nov): {baseline_prcp:.1f} mm")
+print(f"Baseline TMAX  (Jun-Nov): {baseline_tmax:.2f} C")
+print(f"Baseline AWND  (Jun-Nov): {baseline_awnd:.2f} m/s")
+
+# ── Rolling window functions ──────────────────────────────────────────────
+def max_rolling_precip(group, window):
+    return group["PRCP_mm"].rolling(window, min_periods=window).sum().max()
+
+# ── Build annual features ─────────────────────────────────────────────────
+rows = []
+
+for yr in range(1984, 2025):
+    yr_season = season[season["year"] == yr]
+    
+    if len(yr_season) < 100:
+        print(f"WARNING: {yr} has only {len(yr_season)} days — check data")
+        continue
+
+    # PRECIPITATION FEATURES
+    total_prcp          = yr_season["PRCP_mm"].sum()
+    max_1day_prcp       = yr_season["PRCP_mm"].max()
+    max_7day_prcp       = yr_season["PRCP_mm"].rolling(7,  min_periods=7).sum().max()
+    max_14day_prcp      = yr_season["PRCP_mm"].rolling(14, min_periods=14).sum().max()
+    count_days_25mm     = (yr_season["PRCP_mm"] > 25.4).sum()   # >1 inch
+    count_days_50mm     = (yr_season["PRCP_mm"] > 50.8).sum()   # >2 inches
+    count_days_75mm     = (yr_season["PRCP_mm"] > 76.2).sum()   # >3 inches
+    prcp_anomaly        = total_prcp - baseline_prcp
+    longest_dry         = (yr_season["PRCP_mm"] < 2.54
+                          ).astype(int).groupby(
+                          (yr_season["PRCP_mm"] >= 2.54)
+                          .astype(int).cumsum()).sum().max()
+
+    # TEMPERATURE FEATURES
+    mean_tmax           = yr_season["TMAX_C"].mean()
+    tmax_anomaly        = mean_tmax - baseline_tmax
+
+    # Aug-Oct specifically for peak season
+    aug_oct             = yr_season[yr_season["month"].between(8, 10)]
+    mean_tmax_aug_oct   = aug_oct["TMAX_C"].mean()
+    mean_tavg_aug_oct   = aug_oct["TAVG_C"].mean()
+    count_days_90f      = (yr_season["TMAX_C"] > 32.2).sum()  # 90F = 32.2C
+    count_days_95f      = (yr_season["TMAX_C"] > 35.0).sum()  # 95F = 35.0C
+
+    # WIND FEATURES (AWND full period)
+    mean_awnd           = yr_season["AWND_ms"].mean()
+    max_awnd            = yr_season["AWND_ms"].max()
+    count_wind_5ms      = (yr_season["AWND_ms"] > 5.0).sum()
+    count_wind_7ms      = (yr_season["AWND_ms"] > 7.0).sum()
+    awnd_anomaly        = mean_awnd - baseline_awnd
+
+    # WSF features (1996 onwards — NaN before)
+    max_wsf2            = yr_season["WSF2_ms"].max()
+    max_wsf5            = yr_season["WSF5_ms"].max()
+    count_wsf2_10ms     = (yr_season["WSF2_ms"] > 10.0).sum()
+
+    # COMPOUND FEATURES
+    compound_days       = (
+        (yr_season["PRCP_mm"] > 25.4) &
+        (yr_season["AWND_ms"] > 5.0)
+    ).sum()
+
+    rows.append({
+        "year":              yr,
+        # precip
+        "total_prcp_mm":     round(total_prcp, 1),
+        "max_1day_prcp_mm":  round(max_1day_prcp, 1),
+        "max_7day_prcp_mm":  round(max_7day_prcp, 1),
+        "max_14day_prcp_mm": round(max_14day_prcp, 1),
+        "count_days_25mm":   int(count_days_25mm),
+        "count_days_50mm":   int(count_days_50mm),
+        "count_days_75mm":   int(count_days_75mm),
+        "prcp_anomaly_mm":   round(prcp_anomaly, 1),
+        "longest_dry_spell": int(longest_dry),
+        # temperature
+        "mean_tmax_C":       round(mean_tmax, 2),
+        "tmax_anomaly_C":    round(tmax_anomaly, 2),
+        "mean_tmax_aug_oct": round(mean_tmax_aug_oct, 2),
+        "mean_tavg_aug_oct": round(mean_tavg_aug_oct, 2),
+        "count_days_90f":    int(count_days_90f),
+        "count_days_95f":    int(count_days_95f),
+        # wind
+        "mean_awnd_ms":      round(mean_awnd, 2),
+        "max_awnd_ms":       round(max_awnd, 2),
+        "count_wind_5ms":    int(count_wind_5ms),
+        "count_wind_7ms":    int(count_wind_7ms),
+        "awnd_anomaly_ms":   round(awnd_anomaly, 3),
+        "max_wsf2_ms":       round(max_wsf2, 2) if not pd.isna(max_wsf2) else None,
+        "max_wsf5_ms":       round(max_wsf5, 2) if not pd.isna(max_wsf5) else None,
+        "count_wsf2_10ms":   int(count_wsf2_10ms) if not pd.isna(count_wsf2_10ms) else None,
+        # compound
+        "compound_days":     int(compound_days),
+    })
+
+# ── Save ──────────────────────────────────────────────────────────────────
+out = pd.DataFrame(rows)
+out.to_csv("ghcnd_features_annual_1984_2024.csv", index=False)
+
+print(f"\nDone. {len(out)} years processed.")
+print(f"Features: {len(out.columns)-1}")
+print("\nSample (first 3 rows):")
+print(out.head(3).to_string())
