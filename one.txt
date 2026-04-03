@@ -1,137 +1,182 @@
 import pandas as pd
 import numpy as np
-from xgboost import XGBClassifier
-from sklearn.metrics import (classification_report, 
-                             confusion_matrix,
-                             roc_auc_score)
-import matplotlib.pyplot as plt
 
-# ── Load data ────────────────────────────────────────────────────────────
-df = pd.read_csv("master_feature_table_1984_2025.csv")
+# ── Load CMIP6 ────────────────────────────────────────────────────────────
+cmip6 = pd.read_csv("cmip6_daily.csv")
 
-# ── Define features ───────────────────────────────────────────────────────
-drop_cols = [
-    "year",
-    "hit",
-    "n_storms_within_150mi",
-    "closest_storm",
-    "closest_dist_mi",
-    "enso_phase",        # categorical — enso_aso covers this
+# ── Parse date ────────────────────────────────────────────────────────────
+cmip6["date"] = pd.to_datetime(cmip6["time_index"])
+cmip6["year"]  = cmip6["date"].dt.year
+cmip6["month"] = cmip6["date"].dt.month
+
+# ── Unit conversions ──────────────────────────────────────────────────────
+# precip: kg/m2/s to mm/day
+cmip6["precip_mm"] = cmip6["precip"] * 86400
+
+# temperature already in Celsius
+cmip6["tmax_C"]    = cmip6["max_temp"]
+cmip6["tavg_C"]    = cmip6["temperature_2m"]
+
+# wind already in m/s
+cmip6["wind_ms"]   = cmip6["wnd_spd_10m"]
+
+# wind direction ratio from u10/v10
+cmip6["wind_dir_ratio"] = cmip6["u10"] / (cmip6["v10"].replace(0, np.nan))
+
+# ── Filter to hurricane season Jun-Nov ────────────────────────────────────
+season = cmip6[cmip6["month"].between(6, 11)].copy()
+
+# ── Baseline from 2015-2025 overlap period ────────────────────────────────
+baseline = season[season["year"].between(2015, 2025)]
+baseline_precip = baseline.groupby("year")["precip_mm"].sum().mean()
+baseline_tmax   = baseline.groupby("year")["tmax_C"].mean().mean()
+baseline_wind   = baseline.groupby("year")["wind_ms"].mean().mean()
+
+print(f"CMIP6 baseline precip (Jun-Nov): {baseline_precip:.1f} mm")
+print(f"CMIP6 baseline tmax  (Jun-Nov): {baseline_tmax:.2f} C")
+print(f"CMIP6 baseline wind  (Jun-Nov): {baseline_wind:.2f} m/s")
+
+# ── Engineer annual features ──────────────────────────────────────────────
+rows = []
+
+for yr in range(2015, 2060):
+    yr_data = season[season["year"] == yr]
+
+    if len(yr_data) < 100:
+        print(f"WARNING: {yr} only {len(yr_data)} days")
+        continue
+
+    aug_oct = yr_data[yr_data["month"].between(8, 10)]
+
+    # PRECIPITATION
+    total_prcp        = yr_data["precip_mm"].sum()
+    max_1day_prcp     = yr_data["precip_mm"].max()
+    max_7day_prcp     = yr_data["precip_mm"].rolling(7,  min_periods=7).sum().max()
+    max_14day_prcp    = yr_data["precip_mm"].rolling(14, min_periods=14).sum().max()
+    count_days_25mm   = (yr_data["precip_mm"] > 25.4).sum()
+    count_days_50mm   = (yr_data["precip_mm"] > 50.8).sum()
+    count_days_75mm   = (yr_data["precip_mm"] > 76.2).sum()
+    prcp_anomaly      = total_prcp - baseline_precip
+    longest_dry       = (yr_data["precip_mm"] < 2.54
+                        ).astype(int).groupby(
+                        (yr_data["precip_mm"] >= 2.54)
+                        .astype(int).cumsum()).sum().max()
+
+    # TEMPERATURE
+    mean_tmax         = yr_data["tmax_C"].mean()
+    tmax_anomaly      = mean_tmax - baseline_tmax
+    mean_tmax_aug_oct = aug_oct["tmax_C"].mean()
+    mean_tavg_aug_oct = aug_oct["tavg_C"].mean()
+    count_days_90f    = (yr_data["tmax_C"] > 32.2).sum()
+    count_days_95f    = (yr_data["tmax_C"] > 35.0).sum()
+
+    # WIND
+    mean_wind         = yr_data["wind_ms"].mean()
+    max_wind          = yr_data["wind_ms"].max()
+    count_wind_5ms    = (yr_data["wind_ms"] > 5.0).sum()
+    count_wind_7ms    = (yr_data["wind_ms"] > 7.0).sum()
+    awnd_anomaly      = mean_wind - baseline_wind
+
+    # HUMIDITY (bonus)
+    mean_rh_aug_oct   = aug_oct["relativehumidity_2m"].mean()
+    count_rh_80       = (yr_data["relativehumidity_2m"] > 80).sum()
+
+    # COMPOUND (precip + wind threshold)
+    compound_days     = (
+        (yr_data["precip_mm"] > 25.4) &
+        (yr_data["wind_ms"]   > 5.0)
+    ).sum()
+
+    # WIND DIRECTION
+    mean_u10_aug_oct  = aug_oct["u10"].mean()
+    mean_v10_aug_oct  = aug_oct["v10"].mean()
+
+    rows.append({
+        "year":               yr,
+        "total_prcp_mm":      round(total_prcp, 1),
+        "max_1day_prcp_mm":   round(max_1day_prcp, 1),
+        "max_7day_prcp_mm":   round(max_7day_prcp, 1),
+        "max_14day_prcp_mm":  round(max_14day_prcp, 1),
+        "count_days_25mm":    int(count_days_25mm),
+        "count_days_50mm":    int(count_days_50mm),
+        "count_days_75mm":    int(count_days_75mm),
+        "prcp_anomaly_mm":    round(prcp_anomaly, 1),
+        "longest_dry_spell":  int(longest_dry),
+        "mean_tmax_C":        round(mean_tmax, 2),
+        "tmax_anomaly_C":     round(tmax_anomaly, 2),
+        "mean_tmax_aug_oct":  round(mean_tmax_aug_oct, 2),
+        "mean_tavg_aug_oct":  round(mean_tavg_aug_oct, 2),
+        "count_days_90f":     int(count_days_90f),
+        "count_days_95f":     int(count_days_95f),
+        "mean_awnd_ms":       round(mean_wind, 2),
+        "max_awnd_ms":        round(max_wind, 2),
+        "count_wind_5ms":     int(count_wind_5ms),
+        "count_wind_7ms":     int(count_wind_7ms),
+        "awnd_anomaly_ms":    round(awnd_anomaly, 3),
+        "max_wsf2_ms":        None,
+        "max_wsf5_ms":        None,
+        "count_wsf2_10ms":    None,
+        "compound_days":      int(compound_days),
+        "mean_rh_aug_oct":    round(mean_rh_aug_oct, 2),
+        "count_rh_80":        int(count_rh_80),
+        "mean_u10_aug_oct":   round(mean_u10_aug_oct, 3),
+        "mean_v10_aug_oct":   round(mean_v10_aug_oct, 3),
+    })
+
+# ── Save raw CMIP6 features ───────────────────────────────────────────────
+df = pd.DataFrame(rows)
+df.to_csv("cmip6_features_raw_2015_2059.csv", index=False)
+print(f"\nRaw CMIP6 features: {len(df)} years")
+
+# ── Bias correction using 2015-2025 overlap ───────────────────────────────
+# Load GHCND features for same period
+ghcnd = pd.read_csv("ghcnd_features_annual_1984_2025.csv")
+ghcnd_overlap = ghcnd[ghcnd["year"].between(2015, 2025)]
+cmip6_overlap = df[df["year"].between(2015, 2025)]
+
+# Features to bias correct
+# Must match exactly between GHCND and CMIP6
+bc_features = [
+    "total_prcp_mm",
+    "max_1day_prcp_mm",
+    "max_7day_prcp_mm",
+    "max_14day_prcp_mm",
+    "count_days_25mm",
+    "count_days_50mm",
+    "count_days_75mm",
+    "prcp_anomaly_mm",
+    "longest_dry_spell",
+    "mean_tmax_C",
+    "tmax_anomaly_C",
+    "mean_tmax_aug_oct",
+    "mean_tavg_aug_oct",
+    "count_days_90f",
+    "count_days_95f",
+    "mean_awnd_ms",
+    "max_awnd_ms",
+    "count_wind_5ms",
+    "count_wind_7ms",
+    "awnd_anomaly_ms",
+    "compound_days",
 ]
 
-feature_cols = [c for c in df.columns if c not in drop_cols]
-print(f"Features used: {len(feature_cols)}")
-print(feature_cols)
+print("\nBias correction (GHCND mean - CMIP6 mean):")
+biases = {}
+for feat in bc_features:
+    if feat in ghcnd_overlap.columns and feat in cmip6_overlap.columns:
+        ghcnd_mean = ghcnd_overlap[feat].mean()
+        cmip6_mean = cmip6_overlap[feat].mean()
+        bias       = ghcnd_mean - cmip6_mean
+        biases[feat] = bias
+        print(f"  {feat}: GHCND={ghcnd_mean:.2f} "
+              f"CMIP6={cmip6_mean:.2f} bias={bias:.2f}")
 
-X = df[feature_cols]
-y = df["hit"]
+# Apply bias to all CMIP6 years
+df_corrected = df.copy()
+for feat, bias in biases.items():
+    df_corrected[feat] = df_corrected[feat] + bias
 
-# ── Train / validation split ──────────────────────────────────────────────
-# MUST be time based — no random splits
-train = df[df["year"] <= 2015]
-valid = df[df["year"] >  2015]
-
-X_train = train[feature_cols]
-y_train = train["hit"]
-X_valid = valid[feature_cols]
-y_valid = valid["hit"]
-
-print(f"\nTrain: {len(train)} years (1984-2015)")
-print(f"Valid: {len(valid)} years (2016-2025)")
-print(f"Train hits: {y_train.sum()} / {len(y_train)}")
-print(f"Valid hits: {y_valid.sum()} / {len(y_valid)}")
-
-# ── Class imbalance weight ────────────────────────────────────────────────
-n_neg = (y_train == 0).sum()
-n_pos = (y_train == 1).sum()
-scale = n_neg / n_pos
-print(f"\nClass weight (scale_pos_weight): {scale:.2f}")
-
-# ── Train XGBoost ─────────────────────────────────────────────────────────
-model = XGBClassifier(
-    n_estimators      = 100,
-    max_depth         = 3,       # shallow — prevents overfit on small data
-    learning_rate     = 0.05,    # slow learning
-    scale_pos_weight  = scale,   # handle class imbalance
-    subsample         = 0.8,     # row sampling
-    colsample_bytree  = 0.8,     # feature sampling
-    random_state      = 42,
-    eval_metric       = "logloss",
-    verbosity         = 0,
-)
-
-model.fit(
-    X_train, y_train,
-    eval_set=[(X_valid, y_valid)],
-    verbose=False,
-)
-
-# ── Predictions ───────────────────────────────────────────────────────────
-train_probs = model.predict_proba(X_train)[:, 1]
-valid_probs = model.predict_proba(X_valid)[:, 1]
-valid_preds = (valid_probs >= 0.5).astype(int)
-
-# ── Validation results ────────────────────────────────────────────────────
-print("\n" + "="*50)
-print("VALIDATION RESULTS (2016-2025)")
-print("="*50)
-
-print("\nYear by year:")
-for i, (yr, prob, actual) in enumerate(
-    zip(valid["year"], valid_probs, y_valid)):
-    flag = "✓" if (prob >= 0.5) == actual else "✗"
-    print(f"  {yr}: P(hit)={prob:.2f}  actual={actual}  {flag}")
-
-print(f"\nROC-AUC score: {roc_auc_score(y_valid, valid_probs):.3f}")
-print(f"\nClassification report:")
-print(classification_report(y_valid, valid_preds,
-      target_names=["No hit","Hit"]))
-
-print("\nConfusion matrix:")
-cm = confusion_matrix(y_valid, valid_preds)
-print(f"  True Quiet predicted Quiet:    {cm[0][0]}")
-print(f"  True Quiet predicted Hit:      {cm[0][1]}")
-print(f"  True Hit   predicted Quiet:    {cm[1][0]}")
-print(f"  True Hit   predicted Hit:      {cm[1][1]}")
-
-# ── Feature importance ────────────────────────────────────────────────────
-print("\n" + "="*50)
-print("FEATURE IMPORTANCE (top 10)")
-print("="*50)
-
-importance = pd.DataFrame({
-    "feature":    feature_cols,
-    "importance": model.feature_importances_,
-}).sort_values("importance", ascending=False)
-
-print(importance.head(10).to_string(index=False))
-
-# ── Full probability output 1984-2025 ────────────────────────────────────
-all_probs = model.predict_proba(X)[:, 1]
-results = pd.DataFrame({
-    "year":        df["year"].values,
-    "hit_actual":  y.values,
-    "p_hit":       all_probs.round(3),
-    "predicted":   (all_probs >= 0.5).astype(int),
-    "correct":     ((all_probs >= 0.5).astype(int) == y.values).astype(int),
-    "split":       ["train" if yr <= 2015 else "valid"
-                    for yr in df["year"].values],
-})
-
-results.to_csv("xgboost_annual_probabilities.csv", index=False)
-print(f"\nSaved: xgboost_annual_probabilities.csv")
-
-# ── Save model ────────────────────────────────────────────────────────────
-model.save_model("xgboost_hurricane_model.json")
-print("Saved: xgboost_hurricane_model.json")
-
-# ── Plot feature importance ───────────────────────────────────────────────
-top10 = importance.head(10)
-plt.figure(figsize=(8,5))
-plt.barh(top10["feature"][::-1], 
-         top10["importance"][::-1])
-plt.xlabel("Importance")
-plt.title("XGBoost Feature Importance — Top 10")
-plt.tight_layout()
-plt.savefig("feature_importance.png", dpi=150)
-print("Saved: feature_importance.png")
+# Save bias corrected
+df_corrected.to_csv("cmip6_features_bias_corrected_2015_2059.csv", index=False)
+print(f"\nBias corrected CMIP6 features saved")
+print(f"Years: {df_corrected['year'].min()} - {df_corrected['year'].max()}")
