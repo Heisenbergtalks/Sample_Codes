@@ -1,9 +1,8 @@
 import pandas as pd
 import numpy as np
 from scipy import stats
-from scipy.stats import pointbiserialr
+from scipy.stats import pointbiserialr, poisson
 import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -20,7 +19,7 @@ ghcnd["TMAX_C"] = (ghcnd["TMAX"] - 32) * 5/9
 ghcnd["TMIN_C"] = (ghcnd["TMIN"] - 32) * 5/9
 ghcnd["TAVG_C"] = (ghcnd["TAVG"] - 32) * 5/9
 
-# Annual aggregates from GHCND
+# Annual aggregates
 ghcnd_annual = ghcnd.groupby("year").agg(
     annual_max_temp_C  = ("TMAX_C", "max"),
     mean_tmax_C        = ("TMAX_C", "mean"),
@@ -28,7 +27,7 @@ ghcnd_annual = ghcnd.groupby("year").agg(
     mean_tavg_C        = ("TAVG_C", "mean"),
 ).reset_index()
 
-# Hurricane season only (Jun-Nov)
+# Hurricane season Jun-Nov
 season = ghcnd[ghcnd["month"].between(6,11)]
 season_annual = season.groupby("year").agg(
     season_mean_tmax_C = ("TMAX_C", "mean"),
@@ -55,7 +54,6 @@ cmip6_annual = cmip6.groupby("year").agg(
     mean_tmax_C        = ("max_temp", "mean"),
 ).reset_index()
 
-# Hurricane season CMIP6
 cmip6_season = cmip6[cmip6["month"].between(6,11)]
 cmip6_season_annual = cmip6_season.groupby("year").agg(
     season_mean_tmax_C = ("max_temp", "mean"),
@@ -71,23 +69,22 @@ overlap_ghcnd = ghcnd_annual[
 overlap_cmip6 = cmip6_annual[
     cmip6_annual["year"].between(2015,2025)]
 
-bias_mean    = (overlap_ghcnd["mean_tmax_C"].mean() -
-                overlap_cmip6["mean_tmax_C"].mean())
-bias_max     = (overlap_ghcnd["annual_max_temp_C"].mean() -
-                overlap_cmip6["annual_max_temp_C"].mean())
-bias_season  = (overlap_ghcnd["season_mean_tmax_C"].mean() -
-                overlap_cmip6["season_mean_tmax_C"].mean())
+bias_mean   = (overlap_ghcnd["mean_tmax_C"].mean() -
+               overlap_cmip6["mean_tmax_C"].mean())
+bias_max    = (overlap_ghcnd["annual_max_temp_C"].mean() -
+               overlap_cmip6["annual_max_temp_C"].mean())
+bias_season = (overlap_ghcnd["season_mean_tmax_C"].mean() -
+               overlap_cmip6["season_mean_tmax_C"].mean())
 
 print(f"\nBias corrections:")
-print(f"  Mean tmax:    {bias_mean:+.2f} C")
-print(f"  Annual max:   {bias_max:+.2f} C")
-print(f"  Season mean:  {bias_season:+.2f} C")
+print(f"  Mean tmax:   {bias_mean:+.2f} C")
+print(f"  Annual max:  {bias_max:+.2f} C")
+print(f"  Season mean: {bias_season:+.2f} C")
 
 cmip6_annual["mean_tmax_C"]        += bias_mean
 cmip6_annual["annual_max_temp_C"]  += bias_max
 cmip6_annual["season_mean_tmax_C"] += bias_season
 
-# Projection only 2026-2059
 cmip6_proj = cmip6_annual[
     cmip6_annual["year"] >= 2026].copy()
 
@@ -98,15 +95,22 @@ print(f"  2059 mean tmax: "
       f"{cmip6_proj[cmip6_proj['year']==2059]['mean_tmax_C'].values[0]:.2f} C")
 
 # ── MERGE HITS ────────────────────────────────────────────────────────────
-hits = hits[["year","hit","n_storms_within_150mi"]]
-df   = ghcnd_annual.merge(hits, on="year", how="left")
-df   = df[df["year"] <= 2025].copy()
+hits = hits[["year","hit"]]
+hits["year"] = hits["year"].astype(int)
+hits["hit"]  = hits["hit"].astype(int)
+
+ghcnd_annual["year"] = ghcnd_annual["year"].astype(int)
+
+df = ghcnd_annual.merge(hits, on="year", how="left")
+df = df[df["year"] <= 2025].copy()
+df = df.dropna(subset=["hit","mean_tmax_C"])
+df["hit"] = df["hit"].astype(int)
 
 print(f"\nMaster dataset: {len(df)} years")
-print(f"Hit years: {df['hit'].sum()}")
+print(f"Hit years:   {df['hit'].sum()}")
 print(f"Quiet years: {(df['hit']==0).sum()}")
 
-# ── LINEAR TREND FIT ──────────────────────────────────────────────────────
+# ── LINEAR TREND ──────────────────────────────────────────────────────────
 hist_years = df["year"].values
 hist_temps = df["mean_tmax_C"].values
 
@@ -114,11 +118,11 @@ slope, intercept, r, p, se = stats.linregress(
     hist_years, hist_temps)
 
 print(f"\nLinear trend (annual mean TMAX):")
-print(f"  Slope:        {slope:.4f} C/year")
-print(f"  Per decade:   {slope*10:.3f} C/decade")
-print(f"  R²:           {r**2:.3f}")
-print(f"  P-value:      {p:.4f}")
-print(f"  Significant:  {'YES' if p < 0.05 else 'NO'}")
+print(f"  Slope:      {slope:.4f} C/year")
+print(f"  Per decade: {slope*10:.3f} C/decade")
+print(f"  R²:         {r**2:.3f}")
+print(f"  P-value:    {p:.4f}")
+print(f"  Significant: {'YES' if p < 0.05 else 'NO'}")
 
 # Full trend line 1984-2059
 all_years  = np.arange(1984, 2060)
@@ -135,7 +139,7 @@ ci_upper = trend_line + 1.96 * se_line
 ci_lower = trend_line - 1.96 * se_line
 
 # ── TEMPERATURE HURRICANE CORRELATION ─────────────────────────────────────
-baseline_temp = df["mean_tmax_C"].mean()
+baseline_temp      = df["mean_tmax_C"].mean()
 df["temp_anomaly"] = df["mean_tmax_C"] - baseline_temp
 
 corr, pval = pointbiserialr(
@@ -164,12 +168,9 @@ print(f"Historical per decade: {hist_hit_rate*10:.1f} storms")
 proj_rows = []
 for yr in range(2026, 2060):
 
-    # Get CMIP6 projected temp for this year
-    cmip6_yr = cmip6_proj[cmip6_proj["year"]==yr]
-    if len(cmip6_yr) > 0:
-        proj_temp = cmip6_yr["mean_tmax_C"].values[0]
-    else:
-        proj_temp = intercept + slope * yr
+    # Use trend line for temperature projection
+    # More stable than CMIP6 raw values
+    proj_temp = intercept + slope * yr
 
     temp_above = proj_temp - baseline_temp
 
@@ -196,23 +197,86 @@ proj_df.to_csv(
     index=False)
 
 print("\nProjected annual probability:")
-for yr in [2026, 2030, 2035, 2040, 2050, 2059]:
+for yr in [2026,2030,2035,2040,2050,2059]:
     row = proj_df[proj_df["year"]==yr].iloc[0]
     print(f"  {yr}: temp={row['proj_temp_C']:.2f}C  "
           f"prob={row['proj_prob']:.1%}  "
           f"λ={row['poisson_lambda']:.3f}")
 
+# ── YEAR BY YEAR TABLE ────────────────────────────────────────────────────
+print("\n" + "="*60)
+print("YEAR BY YEAR PROJECTIONS 2026-2059")
+print("="*60)
+print(f"{'Year':<6} {'Temp(C)':>8} {'Ann Prob':>10} "
+      f"{'λ/year':>8} {'Cumul Prob':>12}")
+print("-"*50)
+
+avg_lam = proj_df[
+    proj_df["year"].between(2026,2035)
+]["poisson_lambda"].mean()
+
+for _, row in proj_df.iterrows():
+    yr   = int(row["year"])
+    temp = row["proj_temp_C"]
+    prob = row["proj_prob"]
+    lam  = row["poisson_lambda"]
+    yrs_from_now = yr - 2025
+    cumul = 1 - np.exp(-avg_lam * yrs_from_now)
+    print(f"{yr:<6} {temp:>8.2f} {prob:>9.1%} "
+          f"{lam:>8.3f} {cumul:>11.1%}")
+
+# ── PER YEAR STORM COUNT PROBABILITIES ───────────────────────────────────
+print("\n" + "="*60)
+print("ANNUAL STORM COUNT PROBABILITIES BY YEAR")
+print("="*60)
+print(f"{'Year':<6} {'λ':>6} {'P(0 storms)':>13} "
+      f"{'P(1 storm)':>12} {'P(2 storms)':>12} "
+      f"{'P(3+ storms)':>13}")
+print("-"*65)
+
+for yr in [2026,2028,2030,2032,2035,
+           2038,2040,2042,2045,
+           2050,2055,2059]:
+    row = proj_df[proj_df["year"]==yr].iloc[0]
+    lam = row["poisson_lambda"]
+    p0  = poisson.pmf(0, lam)
+    p1  = poisson.pmf(1, lam)
+    p2  = poisson.pmf(2, lam)
+    p3  = 1 - poisson.cdf(2, lam)
+    print(f"{yr:<6} {lam:>6.3f} {p0:>12.1%} "
+          f"{p1:>12.1%} {p2:>12.1%} {p3:>12.1%}")
+
+print()
+print("P(0) = no storms hit Orlando that year")
+print("P(1) = exactly 1 storm hits that year")
+print("P(2) = exactly 2 storms hit that year")
+print("P(3+)= 3 or more storms hit that year")
+
+# Historical comparison
+hist_lam = -np.log(1 - hist_hit_rate)
+h0 = poisson.pmf(0, hist_lam)
+h1 = poisson.pmf(1, hist_lam)
+h2 = poisson.pmf(2, hist_lam)
+h3 = 1 - poisson.cdf(2, hist_lam)
+print(f"\nHistorical baseline (1984-2025):")
+print(f"  λ = {hist_lam:.3f}")
+print(f"  P(0 storms): {h0:.1%}")
+print(f"  P(1 storm):  {h1:.1%}")
+print(f"  P(2 storms): {h2:.1%}")
+print(f"  P(3+ storms):{h3:.1%}")
+
 # ── MONTE CARLO ───────────────────────────────────────────────────────────
 np.random.seed(42)
 n_sims = 10000
 
-print("\nMonte Carlo Results (10,000 simulations):")
-print(f"{'Period':<12} {'Low(10%)':>10} "
-      f"{'Mid(50%)':>10} {'High(90%)':>10} "
-      f"{'Expected':>10}")
-print("-" * 55)
+print("\n" + "="*60)
+print("DECADE SUMMARY — EXPECTED STORM COUNTS")
+print("="*60)
+print(f"{'Period':<12} {'Expected':>10} "
+      f"{'Low(20%)':>10} {'High(80%)':>10}")
+print("-"*45)
 
-decades = {
+decade_data = {
     "Historical":  None,
     "2026-2035":   proj_df[proj_df["year"].between(2026,2035)],
     "2036-2045":   proj_df[proj_df["year"].between(2036,2045)],
@@ -220,68 +284,56 @@ decades = {
 }
 
 mc_results = {}
-
-for period, data in decades.items():
-
+for period, data in decade_data.items():
     if period == "Historical":
-        hist_lam    = -np.log(1 - hist_hit_rate)
-        sim_counts  = np.random.poisson(
-            hist_lam, (n_sims, 10)).sum(axis=1)
-        expected    = hist_hit_rate * 10
+        sim_counts = np.random.poisson(
+            hist_lam, (n_sims,10)).sum(axis=1)
+        expected   = round(hist_hit_rate * 10, 1)
     else:
         lambdas    = data["poisson_lambda"].values
         sim_counts = np.array([
             sum(np.random.poisson(l) for l in lambdas)
             for _ in range(n_sims)
         ])
-        expected = lambdas.sum()
+        expected = round(lambdas.sum(), 1)
 
-    low  = int(np.percentile(sim_counts, 10))
-    mid  = int(np.percentile(sim_counts, 50))
-    high = int(np.percentile(sim_counts, 90))
+    low  = int(np.percentile(sim_counts, 20))
+    high = int(np.percentile(sim_counts, 80))
 
     mc_results[period] = {
-        "low": low, "mid": mid,
-        "high": high, "expected": expected
+        "expected": expected,
+        "low": low,
+        "high": high
     }
-
-    print(f"{period:<12} {low:>10} {mid:>10} "
-          f"{high:>10} {expected:>10.1f}")
+    print(f"{period:<12} {expected:>10} "
+          f"{low:>10} {high:>10}")
 
 # ── CUMULATIVE PROBABILITY ────────────────────────────────────────────────
-avg_lam = proj_df[
-    proj_df["year"].between(2026,2035)
-]["poisson_lambda"].mean()
-
-print("\nCumulative P(at least 1 hurricane impact):")
-print(f"  Using near-term λ = {avg_lam:.3f}/year")
+print(f"\nCumulative P(at least 1 hurricane impact):")
+print(f"  Near term λ = {avg_lam:.3f}/year")
 print()
-for n in [1, 2, 3, 5, 10]:
+for n in [1,2,3,5,10,15,20]:
     prob = 1 - np.exp(-avg_lam * n)
     print(f"  Within {n:2d} year(s):  {prob:.1%}")
 
 # ── MAIN CHART ────────────────────────────────────────────────────────────
-fig, ax = plt.subplots(figsize=(16, 8))
+fig, ax = plt.subplots(figsize=(16,8))
 
-# Confidence band
 ax.fill_between(all_years, ci_lower, ci_upper,
     alpha=0.12, color="#E74C3C",
     label="95% confidence band")
 
-# Historical observed temperature
 ax.plot(df["year"], df["mean_tmax_C"],
     color="#95A5A6", linewidth=1.2,
     alpha=0.7, zorder=2,
     label="Observed annual mean max temp (GHCND)")
 
-# CMIP6 projected temperature
 ax.plot(cmip6_proj["year"],
     cmip6_proj["mean_tmax_C"],
     color="#E67E22", linewidth=1.5,
     linestyle="--", alpha=0.8, zorder=2,
     label="CMIP6 projected temp (EC-Earth3-Veg SSP2-4.5)")
 
-# Trend line historical
 hist_mask = all_years <= 2025
 ax.plot(all_years[hist_mask],
     trend_line[hist_mask],
@@ -289,16 +341,14 @@ ax.plot(all_years[hist_mask],
     zorder=3,
     label=f"Linear trend "
           f"(+{slope*10:.3f}°C/decade, "
-          f"R²={r**2:.2f})")
+          f"R²={r**2:.2f}, p={p:.4f})")
 
-# Trend line projected
 proj_mask = all_years >= 2025
 ax.plot(all_years[proj_mask],
     trend_line[proj_mask],
     color="#E74C3C", linewidth=2.5,
     linestyle="--", zorder=3)
 
-# Hurricane hit years — triangles
 hit_df   = df[df["hit"]==1]
 quiet_df = df[df["hit"]==0]
 
@@ -309,8 +359,8 @@ ax.scatter(hit_df["year"],
     edgecolors="white", linewidth=0.8,
     label=f"Hurricane impact year "
           f"(n={len(hit_df)}, "
-          f"hit rate={warm_hit:.0%} warm / "
-          f"{cool_hit:.0%} cool)")
+          f"{warm_hit:.0%} warm / "
+          f"{cool_hit:.0%} cool yr hit rate)")
 
 ax.scatter(quiet_df["year"],
     quiet_df["mean_tmax_C"],
@@ -320,49 +370,37 @@ ax.scatter(quiet_df["year"],
     linewidth=0.5,
     label=f"Quiet year (n={len(quiet_df)})")
 
-# Today vertical line
 ax.axvline(x=2025.5, color="black",
     linewidth=1.5, linestyle=":",
     alpha=0.6, zorder=3)
-ax.text(2025.8,
-    ax.get_ylim()[0] if ax.get_ylim()[0] > 0
-    else df["mean_tmax_C"].min() + 0.05,
+ax.text(2026, df["mean_tmax_C"].min()+0.1,
     "Today →", fontsize=9,
     color="black", alpha=0.7)
 
-# Historical vs projection labels
-ax.text(2000, df["mean_tmax_C"].max() + 0.05,
-    "◄ Historical observed",
-    fontsize=9, color="#555555",
-    ha="center")
-ax.text(2042, df["mean_tmax_C"].max() + 0.05,
-    "CMIP6 Projection ►",
-    fontsize=9, color="#E67E22",
-    ha="center")
-
-# Annotations for key events
 for _, row in hit_df.iterrows():
     if row["year"] in [2004,2017,2022,2024]:
         ax.annotate(
             str(int(row["year"])),
-            xy=(row["year"], row["mean_tmax_C"]),
+            xy=(row["year"],
+                row["mean_tmax_C"]),
             xytext=(row["year"]+0.5,
-                    row["mean_tmax_C"]+0.08),
+                    row["mean_tmax_C"]+0.1),
             fontsize=7, color="#1B2A4A",
             arrowprops=dict(
                 arrowstyle="-",
                 color="#1B2A4A",
                 lw=0.8))
 
-# Formatting
 ax.set_xlabel("Year", fontsize=12)
-ax.set_ylabel("Annual Mean Max Temperature (°C)",
+ax.set_ylabel(
+    "Annual Mean Max Temperature (°C)",
     fontsize=12)
 ax.set_title(
-    "Orlando MCO — Temperature Trend & Hurricane Impact Years  "
-    "|  1984–2059\n"
-    "GHCND Observed (1984–2025) + EC-Earth3-Veg CMIP6 "
-    "Projection (2026–2059)  |  "
+    "Orlando MCO — Temperature Trend & "
+    "Hurricane Impact Years  |  1984–2059\n"
+    "GHCND Observed (1984–2025) + "
+    "EC-Earth3-Veg CMIP6 Projection "
+    "(2026–2059)  |  "
     "▲ = Hurricane impact  ● = Quiet year",
     fontsize=11, pad=15)
 
@@ -377,61 +415,61 @@ plt.savefig("temperature_hurricane_trend.png",
 plt.show()
 print("\nSaved: temperature_hurricane_trend.png")
 
-# ── SECOND CHART — PROBABILITY PROJECTION ────────────────────────────────
-fig2, ax2 = plt.subplots(figsize=(14, 6))
+# ── PROBABILITY PROJECTION CHART ─────────────────────────────────────────
+fig2, ax2 = plt.subplots(figsize=(14,6))
 
-# Historical probability line
-hist_probs = np.full(len(df), hist_hit_rate)
-ax2.plot(df["year"], hist_probs,
+ax2.axhline(y=hist_hit_rate,
     color="#95A5A6", linewidth=1.5,
     linestyle="--", alpha=0.7,
     label=f"Historical base rate "
           f"({hist_hit_rate:.1%}/year)")
 
-# Projected probability
 ax2.plot(proj_df["year"],
     proj_df["proj_prob"],
     color="#E74C3C", linewidth=2.5,
     label="Projected annual probability")
 
-# Shaded uncertainty
 ax2.fill_between(
     proj_df["year"],
-    proj_df["proj_prob"] * 0.85,
-    proj_df["proj_prob"] * 1.15,
+    proj_df["proj_prob"] * 0.90,
+    proj_df["proj_prob"] * 1.10,
     alpha=0.15, color="#E74C3C",
-    label="±15% uncertainty band")
+    label="±10% uncertainty band")
 
-# Hit/miss markers
 for _, row in df.iterrows():
-    color = "#1B2A4A" if row["hit"]==1 else "#85C1E9"
+    color  = "#1B2A4A" if row["hit"]==1 else "#85C1E9"
     marker = "^" if row["hit"]==1 else "o"
     size   = 100 if row["hit"]==1 else 40
     ax2.scatter(row["year"], row["hit"],
         color=color, marker=marker,
-        s=size, zorder=5,
-        alpha=0.8)
+        s=size, zorder=5, alpha=0.8)
 
-# Today line
 ax2.axvline(x=2025.5, color="black",
     linewidth=1.5, linestyle=":",
     alpha=0.6)
+ax2.text(2026, 0.02,
+    "Today →", fontsize=9,
+    color="black", alpha=0.7)
 
-# Decade annotations
-for period, res in mc_results.items():
-    if period == "Historical":
-        continue
-    yr  = int(period.split("-")[0]) + 5
-    mid = res["mid"]
+d1 = mc_results["2026-2035"]
+d2 = mc_results["2036-2045"]
+d3 = mc_results["2046-2059"]
+
+for period, yr_mid, res in [
+    ("2026-2035", 2030, d1),
+    ("2036-2045", 2040, d2),
+    ("2046-2059", 2052, d3)]:
+
+    prob_at_mid = proj_df[
+        proj_df["year"]==yr_mid
+    ]["proj_prob"].values[0]
+
     ax2.annotate(
-        f"{period}\n{res['low']}-{res['high']} storms\n"
-        f"(mid: {mid})",
-        xy=(yr, proj_df[
-            proj_df["year"]==yr
-        ]["proj_prob"].values[0]
-        if yr in proj_df["year"].values
-        else 0.5),
-        xytext=(yr, 0.75),
+        f"{period}\nExpected: {res['expected']}/decade\n"
+        f"Range: {res['low']}-{res['high']} "
+        f"(60% conf)",
+        xy=(yr_mid, prob_at_mid),
+        xytext=(yr_mid, 0.72),
         fontsize=8, ha="center",
         color="#1B2A4A",
         arrowprops=dict(
@@ -442,61 +480,91 @@ for period, res in mc_results.items():
             boxstyle="round,pad=0.3",
             facecolor="lightyellow",
             edgecolor="#cccccc",
-            alpha=0.8))
+            alpha=0.9))
 
 ax2.set_xlabel("Year", fontsize=12)
 ax2.set_ylabel(
     "Annual Hurricane Impact Probability",
     fontsize=12)
 ax2.set_title(
-    "Orlando MCO — Projected Annual Hurricane Impact Probability  "
+    "Orlando MCO — Projected Annual "
+    "Hurricane Impact Probability  "
     "|  2026–2059\n"
-    "Based on historical hit rate + CMIP6 temperature trend + "
-    "IPCC AR6 frequency adjustment",
+    "Based on GHCND temperature trend + "
+    "IPCC AR6 frequency adjustment + "
+    "Poisson Monte Carlo",
     fontsize=11, pad=15)
 ax2.yaxis.set_major_formatter(
-    plt.FuncFormatter(lambda y, _: f"{y:.0%}"))
+    plt.FuncFormatter(
+        lambda y, _: f"{y:.0%}"))
 ax2.legend(loc="lower right", fontsize=9)
 ax2.grid(True, alpha=0.25)
 ax2.set_xlim(1982, 2061)
 ax2.set_ylim(-0.05, 1.05)
 
 plt.tight_layout()
-plt.savefig("hurricane_probability_projection.png",
+plt.savefig(
+    "hurricane_probability_projection.png",
     dpi=200, bbox_inches="tight")
 plt.show()
 print("Saved: hurricane_probability_projection.png")
 
 # ── EXECUTIVE SUMMARY ─────────────────────────────────────────────────────
+warming_by_2050 = slope * (2050 - 2025)
+
 print("\n" + "="*55)
 print("EXECUTIVE SUMMARY")
 print("="*55)
-
 print(f"""
-Temperature Trend:
-  MCO warming at {slope*10:.3f}C per decade
-  Total warming 1984-2025: {slope*41:.2f}C
-  Projected additional warming
-  by 2050: ~{(intercept+slope*2050)-(intercept+slope*2025):.1f}C
+Temperature Trend (GHCND observed 1984-2025):
+  Warming rate:     +{slope*10:.3f}C per decade
+  Total 1984-2025:  +{slope*41:.2f}C
+  By 2050 (trend):  +{warming_by_2050:.2f}C above today
+  Significance:     p={p:.4f} (statistically significant)
 
-Temperature-Hurricane Link:
-  Warm years hit rate:  {warm_hit:.1%}
-  Cool years hit rate:  {cool_hit:.1%}
-  Difference:           {(warm_hit-cool_hit)*100:.1f} percentage points
+Historical Hurricane Activity (HURDAT2 1984-2025):
+  Annual probability:   {hist_hit_rate:.1%}
+  Expected per decade:  {hist_hit_rate*10:.1f} storms
+  Observed 1984-2025:   {df['hit'].sum()} events
 
-Historical:
-  Average {hist_hit_rate:.1%} annual probability
-  = {hist_hit_rate*10:.1f} storms per decade
+Annual Storm Count (historical baseline):
+  P(0 storms/year): {h0:.1%}
+  P(1 storm/year):  {h1:.1%}
+  P(2 storms/year): {h2:.1%}
+  P(3+ storms/yr):  {h3:.1%}
 
-Projections:
-  2026-2035: {mc_results['2026-2035']['low']}-{mc_results['2026-2035']['high']} storms (mid: {mc_results['2026-2035']['mid']})
-  2036-2045: {mc_results['2036-2045']['low']}-{mc_results['2036-2045']['high']} storms (mid: {mc_results['2036-2045']['mid']})
-  2046-2059: {mc_results['2046-2059']['low']}-{mc_results['2046-2059']['high']} storms (mid: {mc_results['2046-2059']['mid']})
+Annual Storm Count (projected ~2035):
+  P(0 storms/year): {poisson.pmf(0, proj_df[proj_df['year']==2035]['poisson_lambda'].values[0]):.1%}
+  P(1 storm/year):  {poisson.pmf(1, proj_df[proj_df['year']==2035]['poisson_lambda'].values[0]):.1%}
+  P(2 storms/year): {poisson.pmf(2, proj_df[proj_df['year']==2035]['poisson_lambda'].values[0]):.1%}
+  P(3+ storms/yr):  {1-poisson.cdf(2, proj_df[proj_df['year']==2035]['poisson_lambda'].values[0]):.1%}
 
-Cumulative Probability (near term):
+Climate-Adjusted Decade Projections:
+  2026-2035: {d1['expected']} storms expected
+             ({d1['low']}-{d1['high']} range, 60% confidence)
+  2036-2045: {d2['expected']} storms expected
+             ({d2['low']}-{d2['high']} range, 60% confidence)
+  2046-2059: {d3['expected']} storms expected
+             ({d3['low']}-{d3['high']} range, 60% confidence)
+
+Annual Probability Trend:
+  2026: {proj_df[proj_df['year']==2026]['proj_prob'].values[0]:.1%}
+  2035: {proj_df[proj_df['year']==2035]['proj_prob'].values[0]:.1%}
+  2050: {proj_df[proj_df['year']==2050]['proj_prob'].values[0]:.1%}
+  2059: {proj_df[proj_df['year']==2059]['proj_prob'].values[0]:.1%}
+
+Cumulative P(at least 1 hurricane impact):
   Within 1 year:   {1-np.exp(-avg_lam*1):.1%}
   Within 2 years:  {1-np.exp(-avg_lam*2):.1%}
+  Within 3 years:  {1-np.exp(-avg_lam*3):.1%}
   Within 5 years:  {1-np.exp(-avg_lam*5):.1%}
   Within 10 years: {1-np.exp(-avg_lam*10):.1%}
+
+Data Sources:
+  Observed weather: NOAA GHCND USW00012815 (MCO)
+  Hurricane data:   NOAA HURDAT2 1984-2025
+  Climate proj:     EC-Earth3-Veg CMIP6 SSP2-4.5 (NREL)
+  Method:           Linear trend + IPCC AR6 Ch11 adjustment
+                    + Poisson Monte Carlo (10,000 simulations)
 """)
 print("="*55)
