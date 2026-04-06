@@ -1,0 +1,43 @@
+year,n_storms_within_150mi,hit,enso_aso,enso_phase,amo_index,amo_phase,mdr_sst_anomaly,mdr_regime,ace_index,ace_class,year_trend
+1984,0,0,-0.6,La Nina,-0.123,Cool,-0.32,Cool,65,Near Normal,0.0
+1985,2,1,-0.7,La Nina,-0.168,Cool,-0.52,Cool,88,Near Normal,0.024390243902439025
+1986,0,0,0.5,El Nino,-0.079,Neutral,-0.42,Cool,44,Below Normal,0.04878048780487805
+1987,0,0,1.4,El Nino,-0.053,Neutral,-0.02,Neutral,34,Below Normal,0.07317073170731707
+1988,1,1,-1.1,La Nina,-0.072,Neutral,-0.32,Cool,103,Near Normal,0.0975609756097561
+1989,0,0,-0.8,La Nina,-0.14,Cool,-0.12,Cool,135,Near Normal,0.12195121951219512
+1990,0,0,0.3,Neutral,0.012,Neutral,0.08,Neutral,91,Near Normal,0.14634146341463414
+1991,0,0,0.6,El Nino,0.048,Neutral,-0.02,Neutral,34,Below Normal,0.17073170731707318
+1992,1,1,0.7,El Nino,-0.062,Neutral,-0.22,Cool,75,Near Normal,0.1951219512195122
+1993,0,0,0.4,Neutral,0.041,Neutral,0.08,Neutral,39,Below Normal,0.21951219512195122
+1994,0,0,0.5,El Nino,0.082,Neutral,0.18,Neutral,32,Below Normal,0.24390243902439024
+1995,1,1,-0.8,La Nina,0.198,Warm,0.38,Warm,227,Above Normal,0.2682926829268293
+1996,0,0,-0.4,Neutral,0.243,Warm,0.18,Neutral,166,Near Normal,0.2926829268292683
+1997,0,0,1.8,El Nino,0.098,Neutral,0.08,Neutral,40,Below Normal,0.3170731707317073
+1998,1,1,-1.2,La Nina,0.165,Warm,-0.12,Cool,181,Near Normal,0.34146341463414637
+1999,1,1,-1.2,La Nina,0.241,Warm,-0.02,Neutral,177,Near Normal,0.36585365853658536
+2000,1,1,-0.6,La Nina,0.178,Warm,-0.12,Cool,116,Near Normal,0.3902439024390244
+2001,1,1,-0.2,Neutral,0.296,Warm,0.08,Neutral,106,Near Normal,0.4146341463414634
+2002,0,0,0.8,El Nino,0.249,Warm,0.28,Neutral,67,Near Normal,0.43902439024390244
+2003,0,0,0.4,Neutral,0.318,Warm,0.38,Warm,175,Near Normal,0.4634146341463415
+2004,3,1,0.5,El Nino,0.274,Warm,0.48,Warm,225,Above Normal,0.4878048780487805
+2005,1,1,0.3,Neutral,0.352,Warm,0.78,Warm,250,Above Normal,0.5121951219512195
+2006,0,0,0.9,El Nino,0.186,Warm,0.28,Neutral,79,Near Normal,0.5365853658536586
+2007,0,0,-1.2,La Nina,0.141,Warm,0.38,Warm,118,Near Normal,0.5609756097560976
+2008,1,1,-0.9,La Nina,0.062,Neutral,0.18,Neutral,145,Near Normal,0.5853658536585366
+2009,0,0,0.8,El Nino,0.173,Warm,0.48,Warm,123,Near Normal,0.6097560975609756
+2010,0,0,-1.5,La Nina,0.043,Neutral,0.38,Warm,165,Near Normal,0.6341463414634146
+2011,0,0,-1.2,La Nina,-0.021,Neutral,0.28,Neutral,126,Near Normal,0.6585365853658537
+2012,0,0,0.3,Neutral,0.142,Warm,0.58,Warm,133,Near Normal,0.6829268292682927
+2013,0,0,-0.3,Neutral,0.052,Neutral,0.08,Neutral,36,Below Normal,0.7073170731707317
+2014,0,0,0.3,Neutral,0.049,Neutral,0.18,Neutral,67,Near Normal,0.7317073170731707
+2015,0,0,2.3,El Nino,-0.063,Neutral,0.48,Warm,212,Above Normal,0.7560975609756098
+2016,2,1,-0.6,La Nina,0.016,Neutral,0.88,Warm,141,Near Normal,0.7804878048780488
+2017,1,1,-0.8,La Nina,0.062,Neutral,0.68,Warm,225,Above Normal,0.8048780487804879
+2018,1,1,0.8,El Nino,-0.048,Neutral,0.48,Warm,129,Near Normal,0.8292682926829268
+2019,0,0,0.3,Neutral,0.041,Neutral,0.78,Warm,130,Near Normal,0.8536585365853658
+2020,1,1,-1.2,La Nina,-0.112,Cool,0.98,Warm,180,Near Normal,0.8780487804878049
+2021,1,1,-0.9,La Nina,-0.083,Neutral,0.78,Warm,145,Near Normal,0.9024390243902439
+2022,2,1,-1.0,La Nina,-0.142,Cool,0.88,Warm,117,Near Normal,0.926829268292683
+2023,1,1,1.5,El Nino,0.098,Neutral,1.48,Warm,147,Near Normal,0.9512195121951219
+2024,3,1,-0.8,La Nina,0.124,Warm,1.78,Warm,182,Above Normal,0.975609756097561
+2025,0,0,-0.8,La Nina,0.089,Neutral,1.52,Warm,72,Near Normal,1.0
