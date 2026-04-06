@@ -1,1 +1,461 @@
-wffw
+import pandas as pd
+import numpy as np
+import statsmodels.api as sm
+from scipy.stats import poisson
+import matplotlib.pyplot as plt
+import warnings
+warnings.filterwarnings("ignore")
+
+# ── LOAD ALL DATA ─────────────────────────────────────────────────────────
+# Files you already have
+master = pd.read_csv("master_atlantic_features_1984_2025.csv")
+cmip6  = pd.read_csv("cmip6_daily.csv")
+
+# ── CMIP6 ENVIRONMENT INDEX ───────────────────────────────────────────────
+# Build seasonal features from CMIP6
+# Jun-Nov only (hurricane season)
+cmip6["date"]  = pd.to_datetime(cmip6["time_index"])
+cmip6["year"]  = cmip6["date"].dt.year
+cmip6["month"] = cmip6["date"].dt.month
+cmip6["precip_mm"] = cmip6["precip"] * 86400
+
+season = cmip6[cmip6["month"].between(6,11)].copy()
+
+# Baseline from overlap period 2015-2025
+baseline = season[season["year"].between(2015,2025)]
+base_temp   = baseline.groupby("year")["max_temp"].mean().mean()
+base_precip = baseline.groupby("year")["precip_mm"].sum().mean()
+base_rh     = baseline.groupby("year")["relativehumidity_2m"].mean().mean()
+
+print(f"CMIP6 baselines (2015-2025):")
+print(f"  Temp:   {base_temp:.2f} C")
+print(f"  Precip: {base_precip:.1f} mm")
+print(f"  RH:     {base_rh:.1f} %")
+
+# Annual CMIP6 features
+cmip6_annual = []
+for yr in range(2015, 2060):
+    yr_data = season[season["year"]==yr]
+    if len(yr_data) < 100:
+        continue
+    aug_oct = yr_data[yr_data["month"].between(8,10)]
+
+    temp_anom   = yr_data["max_temp"].mean() - base_temp
+    precip_anom = yr_data["precip_mm"].sum() - base_precip
+    rh_mean     = aug_oct["relativehumidity_2m"].mean()
+
+    # Environment index
+    # Normalize each component 0-1 then combine
+    cmip6_annual.append({
+        "year":         yr,
+        "temp_anom":    round(temp_anom, 3),
+        "precip_anom":  round(precip_anom, 1),
+        "rh_aug_oct":   round(rh_mean, 2),
+    })
+
+cmip6_df = pd.DataFrame(cmip6_annual)
+
+# Normalize features for index
+for col in ["temp_anom","precip_anom","rh_aug_oct"]:
+    mn = cmip6_df[col].min()
+    mx = cmip6_df[col].max()
+    cmip6_df[f"{col}_norm"] = (cmip6_df[col]-mn)/(mx-mn)
+
+# Combined environment index (equal weights)
+cmip6_df["env_index"] = (
+    cmip6_df["temp_anom_norm"] +
+    cmip6_df["precip_anom_norm"] +
+    cmip6_df["rh_aug_oct_norm"]
+) / 3
+
+print(f"\nCMIP6 environment index range:")
+print(f"  Min: {cmip6_df['env_index'].min():.3f}")
+print(f"  Max: {cmip6_df['env_index'].max():.3f}")
+print(f"  2015-2025 mean: {cmip6_df[cmip6_df['year']<=2025]['env_index'].mean():.3f}")
+print(f"  2046-2059 mean: {cmip6_df[cmip6_df['year']>=2046]['env_index'].mean():.3f}")
+
+# ── MERGE WITH MASTER ─────────────────────────────────────────────────────
+df = master.merge(
+    cmip6_df[["year","temp_anom","precip_anom",
+              "rh_aug_oct","env_index"]],
+    on="year", how="left")
+
+print(f"\nMerged dataset: {len(df)} rows")
+print(f"CMIP6 overlap (2015-2025): "
+      f"{df['env_index'].notna().sum()} years with index")
+print(f"Missing env_index: "
+      f"{df['env_index'].isna().sum()} years (pre-2015 expected)")
+
+# For years before 2015 fill with baseline (0.5)
+df["env_index"] = df["env_index"].fillna(0.5)
+
+# ── TRAIN THREE MODELS ────────────────────────────────────────────────────
+train = df[df["year"] <= 2015].copy()
+valid = df[df["year"] >  2015].copy()
+
+y_train = train["n_storms_within_150mi"]
+y_valid = valid["n_storms_within_150mi"]
+
+print("\n" + "="*60)
+print("MODEL COMPARISON")
+print("="*60)
+
+results = {}
+
+# Model A: ENSO + ACE (our best so far)
+Xa_train = sm.add_constant(
+    train[["enso_aso","ace_index"]])
+Xa_valid = sm.add_constant(
+    valid[["enso_aso","ace_index"]])
+ma = sm.Poisson(y_train, Xa_train).fit(disp=False)
+pred_a   = ma.predict(Xa_valid)
+mae_a    = abs(y_valid - pred_a).mean()
+results["A: ENSO + ACE"] = {
+    "model":ma,"pred":pred_a,
+    "mae":mae_a,"aic":ma.aic}
+
+# Model B: ENSO + ACE + env_index
+Xb_train = sm.add_constant(
+    train[["enso_aso","ace_index","env_index"]])
+Xb_valid = sm.add_constant(
+    valid[["enso_aso","ace_index","env_index"]])
+mb = sm.Poisson(y_train, Xb_train).fit(disp=False)
+pred_b   = mb.predict(Xb_valid)
+mae_b    = abs(y_valid - pred_b).mean()
+results["B: ENSO + ACE + CMIP6"] = {
+    "model":mb,"pred":pred_b,
+    "mae":mae_b,"aic":mb.aic}
+
+# Model C: ENSO + env_index only
+Xc_train = sm.add_constant(
+    train[["enso_aso","env_index"]])
+Xc_valid = sm.add_constant(
+    valid[["enso_aso","env_index"]])
+mc = sm.Poisson(y_train, Xc_train).fit(disp=False)
+pred_c   = mc.predict(Xc_valid)
+mae_c    = abs(y_valid - pred_c).mean()
+results["C: ENSO + CMIP6"] = {
+    "model":mc,"pred":pred_c,
+    "mae":mae_c,"aic":mc.aic}
+
+# Model D: ENSO + ACE + temp_anom + precip_anom + rh
+Xd_train = sm.add_constant(
+    train[["enso_aso","ace_index",
+           "temp_anom","precip_anom","rh_aug_oct"]])
+Xd_valid = sm.add_constant(
+    valid[["enso_aso","ace_index",
+           "temp_anom","precip_anom","rh_aug_oct"]])
+md = sm.Poisson(y_train, Xd_train).fit(disp=False)
+pred_d   = md.predict(Xd_valid)
+mae_d    = abs(y_valid - pred_d).mean()
+results["D: ENSO+ACE+CMIP6 components"] = {
+    "model":md,"pred":pred_d,
+    "mae":mae_d,"aic":md.aic}
+
+# Print comparison
+print(f"\n{'Model':<35} {'AIC':>8} {'Val MAE':>10} {'Better?':>10}")
+print("-"*65)
+baseline_mae = results["A: ENSO + ACE"]["mae"]
+for name, res in results.items():
+    better = "YES ✓" if res["mae"] < baseline_mae else "NO"
+    if name == "A: ENSO + ACE":
+        better = "BASELINE"
+    print(f"{name:<35} {res['aic']:>8.1f} "
+          f"{res['mae']:>10.3f} {better:>10}")
+
+# Best model by MAE
+best_name = min(results,
+    key=lambda x: results[x]["mae"])
+best = results[best_name]
+best_m = best["model"]
+best_p = best["pred"]
+
+print(f"\nBest model: {best_name}")
+print(f"  AIC: {best['aic']:.1f}")
+print(f"  Val MAE: {best['mae']:.3f}")
+print(f"  Improvement over baseline: "
+      f"{baseline_mae - best['mae']:.3f} storms/year")
+
+# ── BEST MODEL DETAIL ─────────────────────────────────────────────────────
+print("\n" + "="*60)
+print(f"BEST MODEL COEFFICIENTS: {best_name}")
+print("="*60)
+print(best_m.summary().tables[1])
+
+print("\nValidation year by year:")
+print(f"{'Year':<6} {'Actual':>8} {'Predicted':>10} "
+      f"{'Error':>8} {'In 95% CI':>10}")
+print("-"*48)
+
+for yr, act, pred in zip(
+    valid["year"], y_valid, best_p):
+    lo  = poisson.ppf(0.025, max(pred, 0.001))
+    hi  = poisson.ppf(0.975, max(pred, 0.001))
+    err = act - pred
+    ci  = "✓" if lo <= act <= hi else "✗"
+    print(f"{int(yr):<6} {act:>8.0f} {pred:>10.2f} "
+          f"{err:>+8.2f} {ci:>10}")
+
+# ── PROJECT FORWARD ───────────────────────────────────────────────────────
+print("\n" + "="*60)
+print("PROJECTIONS 2026-2059")
+print("="*60)
+
+enso_markov = pd.read_csv(
+    "enso_projection_markov_2025_2059.csv")
+ace_mean = df["ace_index"].mean()
+ace_std  = df["ace_index"].std()
+
+np.random.seed(42)
+n_sims     = 10000
+proj_years = list(range(2026, 2060))
+year_results = {}
+
+for yr in proj_years:
+    enso_row     = enso_markov[
+        enso_markov["year"]==yr].iloc[0]
+    enso_central = enso_row["enso_aso_central"]
+    enso_std_val = df["enso_aso"].std()
+
+    # CMIP6 env index for this year
+    cmip6_yr = cmip6_df[cmip6_df["year"]==yr]
+    if len(cmip6_yr) > 0:
+        env_val      = cmip6_yr["env_index"].values[0]
+        temp_val     = cmip6_yr["temp_anom"].values[0]
+        precip_val   = cmip6_yr["precip_anom"].values[0]
+        rh_val       = cmip6_yr["rh_aug_oct"].values[0]
+    else:
+        env_val    = 0.5
+        temp_val   = 0.0
+        precip_val = 0.0
+        rh_val     = base_rh
+
+    sim_counts = []
+    for _ in range(n_sims):
+        enso_sim = np.random.normal(
+            enso_central, enso_std_val)
+        ace_sim  = max(0, np.random.normal(
+            ace_mean, ace_std))
+
+        # Build feature vector for best model
+        if best_name == "A: ENSO + ACE":
+            X_sim = pd.DataFrame({
+                "const":     [1.0],
+                "enso_aso":  [enso_sim],
+                "ace_index": [ace_sim]})
+        elif best_name == "B: ENSO + ACE + CMIP6":
+            X_sim = pd.DataFrame({
+                "const":     [1.0],
+                "enso_aso":  [enso_sim],
+                "ace_index": [ace_sim],
+                "env_index": [env_val]})
+        elif best_name == "C: ENSO + CMIP6":
+            X_sim = pd.DataFrame({
+                "const":     [1.0],
+                "enso_aso":  [enso_sim],
+                "env_index": [env_val]})
+        else:
+            X_sim = pd.DataFrame({
+                "const":      [1.0],
+                "enso_aso":   [enso_sim],
+                "ace_index":  [ace_sim],
+                "temp_anom":  [temp_val],
+                "precip_anom":[precip_val],
+                "rh_aug_oct": [rh_val]})
+
+        lam   = best_m.predict(X_sim)[0]
+        count = np.random.poisson(max(lam, 0.001))
+        sim_counts.append(count)
+
+    sim_arr = np.array(sim_counts)
+    year_results[yr] = {
+        "year":            yr,
+        "enso_central":    round(enso_central, 2),
+        "env_index":       round(env_val, 3),
+        "expected":        round(float(np.mean(sim_arr)), 3),
+        "p10":             int(np.percentile(sim_arr, 10)),
+        "p50":             int(np.percentile(sim_arr, 50)),
+        "p90":             int(np.percentile(sim_arr, 90)),
+        "p_zero":          round(float(np.mean(sim_arr==0)), 3),
+        "p_one":           round(float(np.mean(sim_arr==1)), 3),
+        "p_two":           round(float(np.mean(sim_arr==2)), 3),
+        "p_three_plus":    round(float(np.mean(sim_arr>=3)), 3),
+        "risk_level":      ("HIGH" if enso_central < -0.5
+                            else "LOW" if enso_central > 0.5
+                            else "MODERATE")
+    }
+
+proj_df = pd.DataFrame(list(year_results.values()))
+proj_df.to_csv(
+    "final_projection_2026_2059.csv",
+    index=False)
+
+# Year by year table
+print(f"\n{'Year':<6} {'ENSO':>6} {'Risk':>10} "
+      f"{'Expected':>10} {'P(0)':>8} "
+      f"{'P(1)':>8} {'P(2+)':>8}")
+print("-"*60)
+for _, r in proj_df.iterrows():
+    p2plus = r["p_two"] + r["p_three_plus"]
+    print(f"{int(r['year']):<6} {r['enso_central']:>+6.2f} "
+          f"{r['risk_level']:>10} {r['expected']:>10.2f} "
+          f"{r['p_zero']:>7.1%} {r['p_one']:>8.1%} "
+          f"{p2plus:>8.1%}")
+
+# Decade summaries
+print(f"\nDecade summaries:")
+hist_mean = df["n_storms_within_150mi"].mean()
+for period in ["2026-2035","2036-2045","2046-2059"]:
+    y1,y2  = int(period[:4]),int(period[5:])
+    yr_exp = proj_df[
+        proj_df["year"].between(y1,y2)
+    ]["expected"].values
+    sim_dec = np.array([
+        sum(np.random.poisson(max(e,0.001))
+            for e in yr_exp)
+        for _ in range(n_sims)
+    ])
+    exp = yr_exp.sum()
+    lo  = int(np.percentile(sim_dec, 20))
+    hi  = int(np.percentile(sim_dec, 80))
+    print(f"  {period}: {exp:.1f} expected "
+          f"({lo}-{hi} range, 60% CI)")
+print(f"  Historical/decade: {hist_mean*10:.1f}")
+
+avg_lam = proj_df[
+    proj_df["year"].between(2026,2035)
+]["expected"].mean()
+print(f"\nCumulative P(at least 1 storm):")
+for n in [1,2,3,5,10]:
+    prob = 1 - np.exp(-avg_lam*n)
+    print(f"  Within {n:2d} year(s): {prob:.1%}")
+
+# ── CHARTS ────────────────────────────────────────────────────────────────
+fig, axes = plt.subplots(2,1,figsize=(16,12))
+
+# Chart 1: Historical + fit
+ax1 = axes[0]
+colors = {"La Nina":"#2E86AB",
+          "El Nino":"#E84855",
+          "Neutral":"#95A5A6"}
+
+for _, row in df.iterrows():
+    c = colors.get(row["enso_phase"],"#95A5A6")
+    ax1.bar(row["year"],
+        row["n_storms_within_150mi"],
+        color=c, alpha=0.7,
+        edgecolor="white", linewidth=0.5)
+
+# Fitted line for best model
+X_all_best = sm.add_constant(
+    df[list(best_m.params.index[1:])])
+df["fitted"] = best_m.predict(X_all_best)
+ax1.plot(df["year"], df["fitted"],
+    color="#E74C3C", linewidth=2.5,
+    marker="o", markersize=4,
+    label="Model fitted values", zorder=5)
+
+# Legend for ENSO colors
+from matplotlib.patches import Patch
+legend_els = [
+    Patch(color="#2E86AB", alpha=0.7,
+          label="La Niña year (higher risk)"),
+    Patch(color="#E84855", alpha=0.7,
+          label="El Niño year (lower risk)"),
+    Patch(color="#95A5A6", alpha=0.7,
+          label="Neutral year"),
+    plt.Line2D([0],[0], color="#E74C3C",
+               linewidth=2, label="Model fit"),
+]
+ax1.legend(handles=legend_els,
+    fontsize=9, loc="upper left")
+
+ax1.set_title(
+    f"Orlando MCO — Hurricane Impacts Per Year  "
+    f"|  1984–2025\n"
+    f"Best Model: {best_name}  |  "
+    f"AIC={best['aic']:.1f}  "
+    f"Val MAE={best['mae']:.3f}",
+    fontsize=11)
+ax1.set_ylabel("Storms within 150mi of MCO",
+    fontsize=11)
+ax1.set_xlabel("Year", fontsize=11)
+ax1.grid(True, alpha=0.25, axis="y")
+ax1.set_xlim(1983, 2026)
+ax1.set_ylim(-0.2, 4.2)
+
+# Chart 2: Projection
+ax2 = axes[1]
+
+# Color bars by risk
+risk_colors = {
+    "HIGH":"#2E86AB",
+    "MODERATE":"#95A5A6",
+    "LOW":"#E84855"
+}
+for _, row in proj_df.iterrows():
+    c = risk_colors.get(row["risk_level"],"#95A5A6")
+    ax2.bar(row["year"],
+        row["expected"],
+        color=c, alpha=0.6,
+        edgecolor="white", linewidth=0.3)
+
+# Trend line through projection
+z = np.polyfit(proj_df["year"],
+    proj_df["expected"], 1)
+p = np.poly1d(z)
+ax2.plot(proj_df["year"],
+    p(proj_df["year"]),
+    color="#E74C3C", linewidth=2.5,
+    linestyle="--",
+    label=f"Trend (+{z[0]*10:.3f}/decade)",
+    zorder=5)
+
+# Historical mean
+hist_mean_line = df["n_storms_within_150mi"].mean()
+ax2.axhline(y=hist_mean_line,
+    color="black", linewidth=1.5,
+    linestyle=":", alpha=0.7,
+    label=f"Historical mean ({hist_mean_line:.2f}/yr)")
+
+ax2.axvline(x=2025.5,
+    color="black", linewidth=1.5,
+    linestyle=":", alpha=0.5)
+ax2.text(2026, 1.8,
+    "Today →", fontsize=9)
+
+legend_els2 = [
+    Patch(color="#2E86AB", alpha=0.6,
+          label="HIGH risk (La Niña projected)"),
+    Patch(color="#95A5A6", alpha=0.6,
+          label="MODERATE risk (Neutral)"),
+    Patch(color="#E84855", alpha=0.6,
+          label="LOW risk (El Niño projected)"),
+    plt.Line2D([0],[0], color="#E74C3C",
+               linewidth=2, linestyle="--",
+               label=f"Trend (+{z[0]*10:.3f}/decade)"),
+]
+ax2.legend(handles=legend_els2,
+    fontsize=9, loc="upper left")
+
+ax2.set_title(
+    "Orlando MCO — Projected Hurricane Risk  "
+    "|  2026–2059\n"
+    "Color = ENSO phase risk level  |  "
+    "Height = Expected storms/year  |  "
+    "Dashed = trend",
+    fontsize=11)
+ax2.set_ylabel(
+    "Expected Storms within 150mi of MCO",
+    fontsize=11)
+ax2.set_xlabel("Year", fontsize=11)
+ax2.grid(True, alpha=0.25, axis="y")
+ax2.set_xlim(2025, 2060)
+ax2.set_ylim(-0.1, 2.2)
+
+plt.tight_layout(pad=3)
+plt.savefig("hurricane_model_final.png",
+    dpi=200, bbox_inches="tight")
+plt.show()
+print("\nSaved: hurricane_model_final.png")
+print("Saved: final_projection_2026_2059.csv")
